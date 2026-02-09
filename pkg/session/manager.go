@@ -178,3 +178,13 @@ func (m *Manager) Save(session *Session) error {
 
 	return nil
 }
+
+// Clear clears a session.
+func (m *Manager) Clear(key string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	delete(m.cache, key)
+	path := m.getSessionPath(key)
+	return os.Remove(path)
+}

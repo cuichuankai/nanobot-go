@@ -127,6 +127,20 @@ func runAgent(args []string) {
 		}
 	}
 
+	// DingTalk
+	if cfg.Channels.DingTalk.Enabled {
+		dingTalkChannel := channels.NewDingTalkChannel(&cfg.Channels.DingTalk, messageBus)
+		if err := dingTalkChannel.Start(); err != nil {
+			fmt.Printf("Error starting DingTalk channel: %v\n", err)
+		} else {
+			messageBus.SubscribeOutbound(dingTalkChannel.Name(), func(msg bus.OutboundMessage) {
+				if err := dingTalkChannel.Send(msg); err != nil {
+					fmt.Printf("Error sending to DingTalk: %v\n", err)
+				}
+			})
+		}
+	}
+
 	// Select provider
 	provider, err := providers.NewProvider(cfg)
 	if err != nil {

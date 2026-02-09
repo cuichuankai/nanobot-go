@@ -28,10 +28,19 @@ type FeishuConfig struct {
 	AllowFrom         []string `json:"allowFrom"`
 }
 
+type DingTalkConfig struct {
+	Enabled   bool     `json:"enabled"`
+	ClientID  string   `json:"clientId"`
+	AppSecret string   `json:"appSecret"`
+	RobotCode string   `json:"robotCode"`
+	AllowFrom []string `json:"allowFrom"`
+}
+
 type ChannelsConfig struct {
 	WhatsApp WhatsAppConfig `json:"whatsapp"`
 	Telegram TelegramConfig `json:"telegram"`
 	Feishu   FeishuConfig   `json:"feishu"`
+	DingTalk DingTalkConfig `json:"dingtalk"`
 }
 
 type AgentDefaults struct {

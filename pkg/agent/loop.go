@@ -135,6 +135,20 @@ func (l *AgentLoop) processMessage(msg bus.InboundMessage) error {
 	log.Printf("Processing message from %s:%s", msg.Channel, msg.SenderID)
 
 	sessionKey := msg.SessionKey()
+
+	// Handle "New Topic" command
+	if strings.TrimSpace(msg.Content) == "新话题" {
+		if err := l.Sessions.Clear(sessionKey); err != nil {
+			log.Printf("Error clearing session: %v", err)
+		}
+		l.Bus.PublishOutbound(bus.OutboundMessage{
+			Channel: msg.Channel,
+			ChatID:  msg.ChatID,
+			Content: "已为您开启新话题，之前的对话记录已被清除。",
+		})
+		return nil
+	}
+
 	sess := l.Sessions.GetOrCreate(sessionKey)
 
 	// Update tool contexts
