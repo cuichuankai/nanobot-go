@@ -4,9 +4,9 @@ This is the Go implementation of [nanobot](https://github.com/nanobot-ai/nanobot
 
 # News
 
--- **2026-02-12**: Support Long-term Memory
--- **2026-02-09**: Add Dingtalk channel
--- **2026-02-07**: nanobot-go first commit
+- **2026-02-12**: Support Long-term Memory
+- **2026-02-09**: Add Dingtalk channel
+- **2026-02-07**: nanobot-go first commit
 
 # getting started
 
