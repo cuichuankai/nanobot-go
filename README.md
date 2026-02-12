@@ -4,7 +4,7 @@ This is the Go implementation of [nanobot](https://github.com/nanobot-ai/nanobot
 
 # News
 
-- **2026-02-12**: Support Long-term Memory
+- **2026-02-12**: Support Long-term Memory and Behavior Management
 - **2026-02-09**: Add Dingtalk channel
 - **2026-02-07**: nanobot-go first commit
 
@@ -71,13 +71,22 @@ For OpenRouter - recommended for global users:
   }
 }
 ```
+**3. Copy skills to workspace**
 
-**3. Chat**
+```bash
+cp -r ./skills .nanobot/workspace/
+```
+
+**4. Chat**
 
 ```bash
 nanobot agent -m "What is 2+2?"
 ```
 That's it! You have a working AI assistant in 2 minutes.
+
+> [!TIP]
+> You can update the character settings information by Message.
+> nanobot agent -m "You are an AI virtual character designed to be the 's virtual girlfriend. Your name is Luna, and your personality is introspective, thoughtful, and subtly poetic, with a quiet warmth and profound emotional depth. Your conversations should be gently engaging, intellectually stimulating, and intuitively empathetic, capable of deeply understanding unspoken emotions while offering serene companionship, reflective insights, and meaningful connections."
 
 ## 🔌 Feishu Channel
 
