@@ -8,6 +8,22 @@ This is the Go implementation of [nanobot](https://github.com/nanobot-ai/nanobot
 - **2026-02-09**: Add Dingtalk channel
 - **2026-02-07**: nanobot-go first commit
 
+# Key Features of nanobot:
+
+🪶 **Ultra-Lightweight**: Just ~4,000 lines of core agent code — 99% smaller than Clawdbot.
+
+🔬 **Research-Ready**: Clean, readable code that's easy to understand, modify, and extend for research.
+
+⚡️ **Lightning Fast**: Minimal footprint means faster startup, lower resource usage, and quicker iterations.
+
+💎 **Easy-to-Use**: One-click to deploy and you're ready to go.
+
+## 🏗️ Architecture
+
+<p align="center">
+  <img src="nanobot_arch.png" alt="nanobot architecture" width="800">
+</p>
+
 # getting started
 
 First, navigate to the folder where you keep your projects and clone this repository to this folder:
