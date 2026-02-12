@@ -358,7 +358,6 @@ func (c *DingTalkChannel) updateInteractiveCard(token, outTrackId, content strin
 		CardOptions: &dingtalkim.UpdateInteractiveCardRequestCardOptions{
 			UpdateCardDataByKey: tea.Bool(false),
 		},
-		RobotCode: tea.String(c.Config.RobotCode),
 	}
 
 	_, err := c.imClient.UpdateInteractiveCardWithOptions(req, headers, &util.RuntimeOptions{})
