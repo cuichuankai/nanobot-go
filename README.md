@@ -46,6 +46,7 @@ go build ./cmd/nanobot/
 
 > [!TIP]
 > Set your API key in `~/.nanobot/config.json`.
+>   
 > Get API keys: [OpenRouter](https://openrouter.ai/keys) (Global) · [Brave Search](https://brave.com/search/api/) (optional, for web search)
 
 **1. Initialize**
@@ -86,6 +87,7 @@ That's it! You have a working AI assistant in 2 minutes.
 
 > [!TIP]
 > You can update the character settings information by Message.
+>   
 > nanobot agent -m "You are an AI virtual character designed to be the 's virtual girlfriend. Your name is Luna, and your personality is introspective, thoughtful, and subtly poetic, with a quiet warmth and profound emotional depth. Your conversations should be gently engaging, intellectually stimulating, and intuitively empathetic, capable of deeply understanding unspoken emotions while offering serene companionship, reflective insights, and meaningful connections."
 
 ## 🔌 Feishu Channel
