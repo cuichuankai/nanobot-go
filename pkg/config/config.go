@@ -29,11 +29,12 @@ type FeishuConfig struct {
 }
 
 type DingTalkConfig struct {
-	Enabled   bool     `json:"enabled"`
-	ClientID  string   `json:"clientId"`
-	AppSecret string   `json:"appSecret"`
-	RobotCode string   `json:"robotCode"`
-	AllowFrom []string `json:"allowFrom"`
+	Enabled    bool     `json:"enabled"`
+	ClientID   string   `json:"clientId"`
+	AppSecret  string   `json:"appSecret"`
+	RobotCode  string   `json:"robotCode"`
+	TemplateID string   `json:"templateId"`
+	AllowFrom  []string `json:"allowFrom"`
 }
 
 type ChannelsConfig struct {

@@ -71,6 +71,7 @@ func NewAgentLoop(
 func (l *AgentLoop) registerDefaultTools() {
 	l.Tools.Register(&tools.ReadFileTool{})
 	l.Tools.Register(&tools.WriteFileTool{})
+	l.Tools.Register(&tools.AppendFileTool{})
 	l.Tools.Register(&tools.EditFileTool{})
 	l.Tools.Register(&tools.ListDirTool{})
 

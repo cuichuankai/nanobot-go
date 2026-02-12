@@ -13,10 +13,12 @@ import (
 	"github.com/HKUDS/nanobot-go/pkg/config"
 
 	openapi "github.com/alibabacloud-go/darabonba-openapi/v2/client"
+	dingtalkim "github.com/alibabacloud-go/dingtalk/im_1_0"
 	dingtalkoauth2 "github.com/alibabacloud-go/dingtalk/oauth2_1_0"
 	dingtalkrobot "github.com/alibabacloud-go/dingtalk/robot_1_0"
 	util "github.com/alibabacloud-go/tea-utils/v2/service"
 	"github.com/alibabacloud-go/tea/tea"
+	"github.com/google/uuid"
 	"github.com/open-dingtalk/dingtalk-stream-sdk-go/chatbot"
 	"github.com/open-dingtalk/dingtalk-stream-sdk-go/client"
 	"github.com/open-dingtalk/dingtalk-stream-sdk-go/logger"
@@ -27,6 +29,7 @@ type DingTalkChannel struct {
 	Config       *config.DingTalkConfig
 	streamClient *client.StreamClient
 	robotClient  *dingtalkrobot.Client
+	imClient     *dingtalkim.Client
 	oauthClient  *dingtalkoauth2.Client
 
 	tokenMu       sync.RWMutex
@@ -66,6 +69,13 @@ func (c *DingTalkChannel) Start() error {
 	}
 	c.robotClient = robotClient
 
+	// IM Client
+	imClient, err := dingtalkim.NewClient(apiConfig)
+	if err != nil {
+		return fmt.Errorf("failed to init dingtalk im client: %v", err)
+	}
+	c.imClient = imClient
+
 	// OAuth Client
 	oauthClient, err := dingtalkoauth2.NewClient(apiConfig)
 	if err != nil {
@@ -75,11 +85,6 @@ func (c *DingTalkChannel) Start() error {
 
 	// Initialize Stream Client
 	logger.SetLogger(logger.NewStdTestLogger())
-	// c.streamClient = client.NewStreamClient(
-	// 	client.WithAppCredential(client.NewAppCredentialConfig(c.Config.ClientID, c.Config.AppSecret)),
-	// 	client.WithUserAgent(client.NewDingtalkGoSDKUserAgent()),
-	// 	client.WithSubscription(utils.SubscriptionTypeKCallback, "ROBOT_MSG", chatbot.NewDefaultChatBotFrameHandler(c.onChatReceive).OnEventReceived),
-	// )
 	c.streamClient = client.NewStreamClient(client.WithAppCredential(client.NewAppCredentialConfig(c.Config.ClientID, c.Config.AppSecret)))
 	c.streamClient.RegisterChatBotCallbackRouter(c.onChatReceive)
 
@@ -193,7 +198,12 @@ func (c *DingTalkChannel) Send(msg bus.OutboundMessage) error {
 		return fmt.Errorf("failed to get access token: %v", err)
 	}
 
-	// Handle stream
+	// 优先使用互动卡片流式输出（需配置 TemplateID）
+	if msg.Stream != nil && c.Config.TemplateID != "" {
+		return c.sendStream(msg, token)
+	}
+
+	// 降级处理：消费流并拼接为普通文本
 	if msg.Stream != nil {
 		var builder strings.Builder
 		for chunk := range msg.Stream {
@@ -226,6 +236,130 @@ func (c *DingTalkChannel) Send(msg bus.OutboundMessage) error {
 
 	log.Printf("[DingTalk] OTO send success")
 	return nil
+}
+
+func (c *DingTalkChannel) sendStream(msg bus.OutboundMessage, token string) error {
+	outTrackId := uuid.New().String()
+	isGroup := strings.HasPrefix(msg.ChatID, "cid")
+
+	// 1. 创建卡片（初始状态）
+	// 使用 "..." 或其他 Loading 字符占位
+	currentContent := "Thinking..."
+	log.Printf("[DingTalk] Creating interactive card (TemplateID=%s, OutTrackID=%s)...", c.Config.TemplateID, outTrackId)
+	if err := c.createInteractiveCard(token, outTrackId, msg.ChatID, isGroup, currentContent); err != nil {
+		log.Printf("[DingTalk] Failed to create interactive card: %v. Fallback to text.", err)
+
+		// 如果创建卡片失败，降级为普通文本发送
+		var builder strings.Builder
+		for chunk := range msg.Stream {
+			builder.WriteString(chunk)
+		}
+		msg.Content = builder.String()
+		if isGroup {
+			return c.sendGroup(token, msg)
+		}
+		return c.sendOTO(token, msg)
+	}
+
+	// 2. 开启流式更新循环
+	// 钉钉接口有频率限制，建议控制在 200ms 以上
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+
+	var contentBuilder strings.Builder
+	var hasPending bool
+
+	log.Printf("[DingTalk] Stream loop started. Waiting for chunks...")
+
+	for {
+		select {
+		case chunk, ok := <-msg.Stream:
+			if !ok {
+				// Stream closed, send final update
+				log.Printf("[DingTalk] Stream closed. Total len=%d. Pending=%v", contentBuilder.Len(), hasPending)
+				if hasPending || contentBuilder.Len() > 0 {
+					if err := c.updateInteractiveCard(token, outTrackId, contentBuilder.String()); err != nil {
+						log.Printf("[DingTalk] Final card update failed: %v", err)
+					} else {
+						log.Printf("[DingTalk] Final card update success")
+					}
+				}
+				return nil
+			}
+			contentBuilder.WriteString(chunk)
+			hasPending = true
+
+		case <-ticker.C:
+			if hasPending {
+				log.Printf("[DingTalk] Ticker update. Len=%d", contentBuilder.Len())
+				if err := c.updateInteractiveCard(token, outTrackId, contentBuilder.String()); err != nil {
+					log.Printf("[DingTalk] Update card failed: %v", err)
+				}
+				hasPending = false
+			}
+		}
+	}
+}
+
+// createInteractiveCard 创建互动卡片实例
+func (c *DingTalkChannel) createInteractiveCard(token, outTrackId, targetId string, isGroup bool, content string) error {
+	headers := &dingtalkim.SendInteractiveCardHeaders{
+		XAcsDingtalkAccessToken: tea.String(token),
+	}
+
+	req := &dingtalkim.SendInteractiveCardRequest{
+		OutTrackId:     tea.String(outTrackId),
+		CardTemplateId: tea.String(c.Config.TemplateID),
+		CardData: &dingtalkim.SendInteractiveCardRequestCardData{
+			CardParamMap: map[string]*string{
+				"content":         tea.String(content),
+				"text":            tea.String(content),
+				"markdown":        tea.String(content),
+				"body":            tea.String(content),
+				"message":         tea.String(content),
+				"description":     tea.String(content),
+				"title":           tea.String(content),
+				"header":          tea.String(content),
+				"markdownContent": tea.String(content),
+			},
+		},
+		RobotCode: tea.String(c.Config.RobotCode),
+	}
+
+	if isGroup {
+		req.ConversationType = tea.Int32(1)
+		req.OpenConversationId = tea.String(targetId)
+	} else {
+		req.ConversationType = tea.Int32(0)
+		req.ReceiverUserIdList = []*string{tea.String(targetId)}
+	}
+
+	_, err := c.imClient.SendInteractiveCardWithOptions(req, headers, &util.RuntimeOptions{})
+	return err
+}
+
+// updateInteractiveCard 更新互动卡片内容
+func (c *DingTalkChannel) updateInteractiveCard(token, outTrackId, content string) error {
+	headers := &dingtalkim.UpdateInteractiveCardHeaders{
+		XAcsDingtalkAccessToken: tea.String(token),
+	}
+
+	req := &dingtalkim.UpdateInteractiveCardRequest{
+		OutTrackId: tea.String(outTrackId),
+		CardData: &dingtalkim.UpdateInteractiveCardRequestCardData{
+			CardParamMap: map[string]*string{
+				"content":     tea.String(content),
+				"lastMessage": tea.String(content),
+			},
+		},
+		CardOptions: &dingtalkim.UpdateInteractiveCardRequestCardOptions{
+			UpdateCardDataByKey: tea.Bool(false),
+		},
+		RobotCode: tea.String(c.Config.RobotCode),
+	}
+
+	_, err := c.imClient.UpdateInteractiveCardWithOptions(req, headers, &util.RuntimeOptions{})
+	return err
 }
 
 func (c *DingTalkChannel) sendOTO(token string, msg bus.OutboundMessage) error {

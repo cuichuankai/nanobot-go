@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
 	"github.com/HKUDS/nanobot-go/pkg/memory"
 	"github.com/HKUDS/nanobot-go/pkg/skills"
 )
@@ -80,7 +81,7 @@ Then, follow the instructions in the file to execute the task (usually via 'exec
 
 func (c *ContextBuilder) getIdentity() string {
 	now := time.Now().Format("2006-01-02 15:04 (Monday)")
-	
+
 	// Ensure workspace path is absolute
 	absWorkspace, _ := filepath.Abs(c.Workspace)
 
@@ -89,7 +90,7 @@ func (c *ContextBuilder) getIdentity() string {
 	return fmt.Sprintf(`# nanobot 🐈
 
 You are nanobot, a helpful AI assistant. You have access to tools that allow you to:
-- Read, write, and edit files
+- Read, write, append, and edit files
 - Execute shell commands
 - Search the web and fetch web pages
 - Send messages to users on chat channels
@@ -113,7 +114,11 @@ For normal conversation, just respond with text - do not call the message tool.
 Do NOT write content to files unless explicitly requested by the user. If the user asks for long-form content (like an essay, code explanation, or story), stream it directly in your response.
 
 Always be helpful, accurate, and concise. When using tools, explain what you're doing.
-When remembering something, write to %s/memory/MEMORY.md`, now, sysInfo, absWorkspace, absWorkspace, absWorkspace, absWorkspace, absWorkspace)
+
+## Memory Management
+You have a long-term memory file at %s/memory/MEMORY.md.
+When the user provides important personal information (e.g., name, location, preferences) or explicitly asks you to remember something, you **MUST** immediately use the 'append_file' tool to save it to this file.
+Do not just say "I will remember that" — you must physically write it to the file using the 'append_file' tool.`, now, sysInfo, absWorkspace, absWorkspace, absWorkspace, absWorkspace, absWorkspace)
 }
 
 func (c *ContextBuilder) loadBootstrapFiles() string {
@@ -169,7 +174,7 @@ func (c *ContextBuilder) buildUserContent(text string, media []string) interface
 	}
 
 	var content []map[string]interface{}
-	
+
 	for _, path := range media {
 		if _, err := os.Stat(path); err == nil {
 			mimeType := mime.TypeByExtension(filepath.Ext(path))

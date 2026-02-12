@@ -164,6 +164,8 @@ func (p *OpenAIProvider) Stream(ctx context.Context, messages []interface{}, too
 		return nil, fmt.Errorf("failed to marshal request body: %w", err)
 	}
 
+	// log.Printf("Sending request to OpenAI API: %s", string(jsonBody))
+
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonBody))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
@@ -240,6 +242,7 @@ func (p *OpenAIProvider) Stream(ctx context.Context, messages []interface{}, too
 				// Ignore parse errors for partial lines or keep going
 				continue
 			}
+			// log.Printf("Received chunk: %s", data)
 
 			if len(chunk.Choices) > 0 {
 				choice := chunk.Choices[0]

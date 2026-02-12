@@ -206,6 +206,75 @@ func (t *EditFileTool) Execute(args map[string]interface{}) (string, error) {
 	return fmt.Sprintf("Successfully edited %s", path), nil
 }
 
+// AppendFileTool appends content to a file.
+type AppendFileTool struct {
+	BaseTool
+}
+
+func (t *AppendFileTool) Name() string {
+	return "append_file"
+}
+
+func (t *AppendFileTool) Description() string {
+	return "Append content to the end of a file. Creates the file if it doesn't exist."
+}
+
+func (t *AppendFileTool) Parameters() map[string]interface{} {
+	return map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"path": map[string]interface{}{
+				"type":        "string",
+				"description": "The file path to append to",
+			},
+			"content": map[string]interface{}{
+				"type":        "string",
+				"description": "The content to append",
+			},
+		},
+		"required": []string{"path", "content"},
+	}
+}
+
+func (t *AppendFileTool) ToSchema() map[string]interface{} {
+	return GenerateSchema(t)
+}
+
+func (t *AppendFileTool) Execute(args map[string]interface{}) (string, error) {
+	path, ok := args["path"].(string)
+	if !ok {
+		return "", fmt.Errorf("path must be a string")
+	}
+	content, ok := args["content"].(string)
+	if !ok {
+		return "", fmt.Errorf("content must be a string")
+	}
+
+	if !strings.HasSuffix(content, "\n") {
+		content += "\n"
+	}
+
+	expandedPath := expandPath(path)
+	if err := os.MkdirAll(filepath.Dir(expandedPath), 0755); err != nil {
+		return "", fmt.Errorf("error creating directories: %w", err)
+	}
+
+	f, err := os.OpenFile(expandedPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		if os.IsPermission(err) {
+			return fmt.Sprintf("Error: Permission denied: %s", path), nil
+		}
+		return "", fmt.Errorf("error opening file: %w", err)
+	}
+	defer f.Close()
+
+	if _, err := f.WriteString(content); err != nil {
+		return "", fmt.Errorf("error writing to file: %w", err)
+	}
+
+	return fmt.Sprintf("Successfully appended to %s", path), nil
+}
+
 // ListDirTool lists directory contents.
 type ListDirTool struct {
 	BaseTool
