@@ -183,6 +183,9 @@ func (c *DingTalkChannel) onChatReceive(ctx context.Context, data *chatbot.BotCa
 		SenderID: senderStaffId,
 		ChatID:   targetId,
 		Content:  content,
+		Metadata: map[string]interface{}{
+			"sender_name": data.SenderNick,
+		},
 	})
 
 	return nil, nil

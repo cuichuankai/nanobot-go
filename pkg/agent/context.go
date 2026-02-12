@@ -118,7 +118,19 @@ Always be helpful, accurate, and concise. When using tools, explain what you're 
 ## Memory Management
 You have a long-term memory file at %s/memory/MEMORY.md.
 When the user provides important personal information (e.g., name, location, preferences) or explicitly asks you to remember something, you **MUST** immediately use the 'append_file' tool to save it to this file.
-Do not just say "I will remember that" — you must physically write it to the file using the 'append_file' tool.`, now, sysInfo, absWorkspace, absWorkspace, absWorkspace, absWorkspace, absWorkspace)
+Do not just say "I will remember that" — you must physically write it to the file using the 'append_file' tool.
+
+## Identity & Behavior Management
+You have a soul file at %s/SOUL.md.
+When the user defines your persona, character, personality, or fundamental behavioral rules (e.g., "You are a virtual girlfriend", "Always answer in French"), you **MUST** save this definition to %s/SOUL.md using the 'write_file' (to overwrite/initialize) or 'append_file' tool.
+This ensures you maintain this personality across sessions.
+
+## Conversation Handling
+In group chats, user messages may be prefixed with '[Name]:' (e.g., '[Alice]: Hello').
+- This indicates the sender's name.
+- You should associate this name with the user in your context.
+- When replying, address the user by this name to be more personal.
+- If you need to remember facts about this specific user, associate them with this name in your memory.`, now, sysInfo, absWorkspace, absWorkspace, absWorkspace, absWorkspace, absWorkspace, absWorkspace, absWorkspace)
 }
 
 func (c *ContextBuilder) loadBootstrapFiles() string {

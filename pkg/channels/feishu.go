@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"log"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -21,25 +24,55 @@ import (
 // FeishuChannel implements the Feishu channel.
 type FeishuChannel struct {
 	BaseChannel
-	Config   *config.FeishuConfig
-	client   *lark.Client
-	wsClient *larkws.Client
+	Config    *config.FeishuConfig
+	Workspace string
+	client    *lark.Client
+	wsClient  *larkws.Client
 }
 
 // NewFeishuChannel creates a new FeishuChannel.
-func NewFeishuChannel(cfg *config.FeishuConfig, messageBus *bus.MessageBus) *FeishuChannel {
+func NewFeishuChannel(cfg *config.FeishuConfig, messageBus *bus.MessageBus, workspace string) *FeishuChannel {
 	return &FeishuChannel{
 		BaseChannel: BaseChannel{
 			Config:    cfg,
 			Bus:       messageBus,
 			AllowFrom: cfg.AllowFrom,
 		},
-		Config: cfg,
+		Config:    cfg,
+		Workspace: workspace,
 	}
 }
 
 func (c *FeishuChannel) Name() string {
 	return "feishu"
+}
+
+func (c *FeishuChannel) getAgentName() string {
+	if c.Workspace == "" {
+		return "Nanobot"
+	}
+	path := filepath.Join(c.Workspace, "SOUL.md")
+	content, err := ioutil.ReadFile(path)
+	if err != nil {
+		return "Nanobot"
+	}
+	text := string(content)
+
+	// Try "名字叫XX" or "名字是XX" (supports Chinese punctuation)
+	re := regexp.MustCompile(`名字[叫是]([^，,。.\n]+)`)
+	matches := re.FindStringSubmatch(text)
+	if len(matches) > 1 {
+		return strings.TrimSpace(matches[1])
+	}
+
+	// Try "Name: XX"
+	reEn := regexp.MustCompile(`(?i)Named[:\s]+([^,\n]+)`)
+	matchesEn := reEn.FindStringSubmatch(text)
+	if len(matchesEn) > 1 {
+		return strings.TrimSpace(matchesEn[1])
+	}
+
+	return "Nanobot"
 }
 
 func (c *FeishuChannel) Start() error {
@@ -131,7 +164,7 @@ func (c *FeishuChannel) sendStream(msg bus.OutboundMessage, receiveIDType string
 		"header": map[string]interface{}{
 			"title": map[string]interface{}{
 				"tag":     "plain_text",
-				"content": "Nanobot",
+				"content": c.getAgentName(),
 			},
 			"template": "blue",
 		},
@@ -364,6 +397,13 @@ func (c *FeishuChannel) Send(msg bus.OutboundMessage) error {
 	cardContent := map[string]interface{}{
 		"config": map[string]interface{}{
 			"wide_screen_mode": true,
+		},
+		"header": map[string]interface{}{
+			"title": map[string]interface{}{
+				"tag":     "plain_text",
+				"content": c.getAgentName(),
+			},
+			"template": "blue",
 		},
 		"elements": []interface{}{
 			map[string]interface{}{

@@ -170,8 +170,13 @@ func (l *AgentLoop) processMessage(msg bus.InboundMessage) error {
 	}
 
 	// Build initial messages
+	content := msg.Content
+	if name, ok := msg.Metadata["sender_name"].(string); ok && name != "" {
+		content = fmt.Sprintf("[%s]: %s", name, content)
+	}
+
 	history := sess.GetHistory(50) // Limit history
-	messages := l.Context.BuildMessages(history, msg.Content, msg.Media, msg.Channel, msg.ChatID)
+	messages := l.Context.BuildMessages(history, content, msg.Media, msg.Channel, msg.ChatID)
 
 	iteration := 0
 	var finalContent string
@@ -311,7 +316,7 @@ func (l *AgentLoop) processMessage(msg bus.InboundMessage) error {
 	}
 
 	// Save to session
-	sess.AddMessage("user", msg.Content, nil)
+	sess.AddMessage("user", content, nil)
 	sess.AddMessage("assistant", finalContent, nil)
 	l.Sessions.Save(sess)
 
