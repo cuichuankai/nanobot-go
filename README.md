@@ -4,6 +4,7 @@ This is the Go implementation of [nanobot](https://github.com/nanobot-ai/nanobot
 
 # News
 
+- **2026-02-14**: Add media-generation tool
 - **2026-02-12**: Support Long-term Memory and Behavior Management
 - **2026-02-09**: Add Dingtalk channel
 - **2026-02-07**: nanobot-go first commit
