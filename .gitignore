@@ -1,5 +1,7 @@
 # User specific
 .nanobot/
+build/bin/
+bin/
 nanobot
 
 # OS specific

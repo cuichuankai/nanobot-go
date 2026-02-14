@@ -92,6 +92,9 @@ func (l *AgentLoop) registerDefaultTools() {
 
 	// Register MessageTool
 	l.Tools.Register(tools.NewMessageTool(l.Bus))
+
+	// Register MediaGenTool
+	l.Tools.Register(tools.NewMediaGenTool(l.Config))
 }
 
 // Run starts the agent loop.

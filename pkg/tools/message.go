@@ -32,7 +32,7 @@ func (t *MessageTool) Name() string {
 }
 
 func (t *MessageTool) Description() string {
-	return "Send a message to the user. Use this when you want to communicate something."
+	return "Send a message to the user. Supports text, image, audio, and video. Use this to send files or communicate."
 }
 
 func (t *MessageTool) ToSchema() map[string]interface{} {
@@ -45,7 +45,16 @@ func (t *MessageTool) Parameters() map[string]interface{} {
 		"properties": map[string]interface{}{
 			"content": map[string]interface{}{
 				"type":        "string",
-				"description": "The message content to send",
+				"description": "The message content (text body or caption)",
+			},
+			"type": map[string]interface{}{
+				"type":        "string",
+				"description": "Message type: text, image, audio, video",
+				"enum":        []string{"text", "image", "audio", "video"},
+			},
+			"media": map[string]interface{}{
+				"type":        "string",
+				"description": "Path or URL to the media file (required for image/audio/video)",
 			},
 			"channel": map[string]interface{}{
 				"type":        "string",
@@ -56,14 +65,25 @@ func (t *MessageTool) Parameters() map[string]interface{} {
 				"description": "Optional: target chat/user ID",
 			},
 		},
-		"required": []string{"content"},
+		"required": []string{},
 	}
 }
 
 func (t *MessageTool) Execute(args map[string]interface{}) (string, error) {
-	content, ok := args["content"].(string)
-	if !ok {
-		return "", fmt.Errorf("content is required")
+	content, _ := args["content"].(string)
+	msgType, _ := args["type"].(string)
+	media, _ := args["media"].(string)
+
+	if msgType == "" {
+		msgType = "text"
+	}
+
+	if (msgType == "image" || msgType == "audio" || msgType == "video") && media == "" {
+		return "", fmt.Errorf("media path/url is required for %s message", msgType)
+	}
+	
+	if msgType == "text" && content == "" {
+		return "", fmt.Errorf("content is required for text message")
 	}
 
 	channel := t.DefaultChannel
@@ -88,10 +108,12 @@ func (t *MessageTool) Execute(args map[string]interface{}) (string, error) {
 		Channel: channel,
 		ChatID:  chatID,
 		Content: content,
+		Type:    bus.MessageType(msgType),
+		Media:   media,
 	}
 
 	// We publish directly to outbound
 	t.Bus.PublishOutbound(msg)
 
-	return fmt.Sprintf("Message sent to %s:%s", channel, chatID), nil
+	return fmt.Sprintf("Message (%s) sent to %s:%s", msgType, channel, chatID), nil
 }

@@ -1,16 +1,21 @@
 package channels
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"mime/multipart"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/HKUDS/nanobot-go/pkg/bus"
 	"github.com/HKUDS/nanobot-go/pkg/config"
+	"github.com/HKUDS/nanobot-go/pkg/utils"
 
 	openapi "github.com/alibabacloud-go/darabonba-openapi/v2/client"
 	dingtalkim "github.com/alibabacloud-go/dingtalk/im_1_0"
@@ -89,6 +94,12 @@ func (c *DingTalkChannel) Start() error {
 	c.streamClient.RegisterChatBotCallbackRouter(c.onChatReceive)
 
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("[DingTalk] Panic recovered in stream client goroutine: %v", r)
+			}
+		}()
+
 		log.Println("Starting DingTalk Stream Client...")
 		// Start is blocking, so run in goroutine
 		if err := c.streamClient.Start(context.Background()); err != nil {
@@ -145,6 +156,12 @@ func (c *DingTalkChannel) getAccessToken() (string, error) {
 }
 
 func (c *DingTalkChannel) onChatReceive(ctx context.Context, data *chatbot.BotCallbackDataModel) ([]byte, error) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[DingTalk] Panic recovered in onChatReceive: %v", r)
+		}
+	}()
+
 	content := strings.TrimSpace(data.Text.Content)
 	if content == "" {
 		log.Printf("[DingTalk] Empty content received")
@@ -201,44 +218,130 @@ func (c *DingTalkChannel) Send(msg bus.OutboundMessage) error {
 		return fmt.Errorf("failed to get access token: %v", err)
 	}
 
-	// 优先使用互动卡片流式输出（需配置 TemplateID）
-	if msg.Stream != nil && c.Config.TemplateID != "" {
-		return c.sendStream(msg, token)
-	}
-
-	// 降级处理：消费流并拼接为普通文本
+	// 处理流消息
 	if msg.Stream != nil {
-		var builder strings.Builder
-		for chunk := range msg.Stream {
-			builder.WriteString(chunk)
+		// 1. 如果是文本消息，我们需要流内容作为最终的 Content
+		if msg.Type == bus.MessageTypeText || msg.Type == "" {
+			// 如果配置了 TemplateID，且是文本，尝试使用卡片流式发送
+			if c.Config.TemplateID != "" {
+				return c.sendStream(msg, token)
+			}
+
+			// 否则降级：同步读取流，拼接为文本
+			var builder strings.Builder
+			for chunk := range msg.Stream {
+				builder.WriteString(chunk)
+			}
+			msg.Content = builder.String()
+		} else {
+			// 2. 如果是媒体消息（Image/Audio/Video），钉钉不支持 Caption
+			// 我们不需要流的内容，但必须消费掉流以防发送端阻塞
+			// 使用 goroutine 异步排空，避免阻塞媒体发送
+			go func(stream <-chan string) {
+				for range stream {
+					// 丢弃内容
+				}
+			}(msg.Stream)
 		}
-		msg.Content = builder.String()
 	}
 
-	log.Printf("[DingTalk] Sending message to %s (len=%d)", msg.ChatID, len(msg.Content))
+	log.Printf("[DingTalk] Sending message to %s (len=%d) Type=%s", msg.ChatID, len(msg.Content), msg.Type)
 
-	if msg.Content == "" {
-		log.Printf("[DingTalk] Skipping empty message")
+	switch msg.Type {
+	case bus.MessageTypeImage:
+		if msg.Media == "" {
+			return fmt.Errorf("media is empty")
+		}
+		reader, filename, err := utils.GetMediaReader(msg.Media)
+		if err != nil {
+			return err
+		}
+		defer reader.Close()
+
+		mediaId, err := c.uploadMedia(token, "image", filename, reader)
+		if err != nil {
+			return err
+		}
+
+		log.Printf("[DingTalk] Image uploaded, mediaId: %s", mediaId)
+
+		param := map[string]string{
+			"photoURL": mediaId,
+			"picURL":   mediaId,
+		}
+		return c.sendMedia(token, msg.ChatID, "sampleImageMsg", param)
+
+	case bus.MessageTypeAudio:
+		if msg.Media == "" {
+			return fmt.Errorf("media is empty")
+		}
+		reader, filename, err := utils.GetMediaReader(msg.Media)
+		if err != nil {
+			return err
+		}
+		defer reader.Close()
+
+		mediaId, err := c.uploadMedia(token, "voice", filename, reader)
+		if err != nil {
+			return err
+		}
+
+		param := map[string]string{"mediaId": mediaId, "duration": "10"}
+		return c.sendMedia(token, msg.ChatID, "sampleAudio", param)
+
+	case bus.MessageTypeVideo:
+		if msg.Media == "" {
+			return fmt.Errorf("media is empty")
+		}
+		reader, filename, err := utils.GetMediaReader(msg.Media)
+		if err != nil {
+			return err
+		}
+		defer reader.Close()
+
+		videoMediaId, err := c.uploadMedia(token, "video", filename, reader)
+		if err != nil {
+			return err
+		}
+
+		picMediaId, err := c.getCoverMediaId(token)
+		if err != nil {
+			log.Printf("failed to get cover media id: %v", err)
+			return err
+		}
+
+		param := map[string]string{
+			"videoMediaId": videoMediaId,
+			"picMediaId":   picMediaId,
+			"duration":     "10",
+			"videoType":    "mp4",
+		}
+		return c.sendMedia(token, msg.ChatID, "sampleVideo", param)
+
+	default:
+		if msg.Content == "" {
+			log.Printf("[DingTalk] Skipping empty message")
+			return nil
+		}
+
+		// Heuristic: if ID starts with "cid", it is likely a conversation ID (group chat).
+		// Skip OTO and try Group send directly to avoid "staffId.notExisted" errors.
+		if strings.HasPrefix(msg.ChatID, "cid") {
+			if errGroup := c.sendGroup(token, msg); errGroup != nil {
+				return fmt.Errorf("failed to send dingtalk group message: %v", errGroup)
+			}
+			log.Printf("[DingTalk] Group send success (CID)")
+			return nil
+		}
+
+		// Try OTO first (works for StaffID)
+		if err := c.sendOTO(token, msg); err != nil {
+			return fmt.Errorf("failed to send dingtalk message (OTO): %v", err)
+		}
+
+		log.Printf("[DingTalk] OTO send success")
 		return nil
 	}
-
-	// Heuristic: if ID starts with "cid", it is likely a conversation ID (group chat).
-	// Skip OTO and try Group send directly to avoid "staffId.notExisted" errors.
-	if strings.HasPrefix(msg.ChatID, "cid") {
-		if errGroup := c.sendGroup(token, msg); errGroup != nil {
-			return fmt.Errorf("failed to send dingtalk group message: %v", errGroup)
-		}
-		log.Printf("[DingTalk] Group send success (CID)")
-		return nil
-	}
-
-	// Try OTO first (works for StaffID)
-	if err := c.sendOTO(token, msg); err != nil {
-		return fmt.Errorf("failed to send dingtalk message (OTO): %v", err)
-	}
-
-	log.Printf("[DingTalk] OTO send success")
-	return nil
 }
 
 func (c *DingTalkChannel) sendStream(msg bus.OutboundMessage, token string) error {
@@ -399,5 +502,95 @@ func (c *DingTalkChannel) sendGroup(token string, msg bus.OutboundMessage) error
 	}
 
 	_, err := c.robotClient.OrgGroupSendWithOptions(req, headers, &util.RuntimeOptions{})
+	return err
+}
+
+func (c *DingTalkChannel) uploadMedia(token, mediaType, filename string, reader io.Reader) (string, error) {
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	part, err := writer.CreateFormFile("media", filename)
+	if err != nil {
+		return "", err
+	}
+	_, err = io.Copy(part, reader)
+	if err != nil {
+		return "", err
+	}
+	writer.Close()
+
+	url := fmt.Sprintf("https://oapi.dingtalk.com/media/upload?access_token=%s&type=%s", token, mediaType)
+	req, err := http.NewRequest("POST", url, body)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		ErrCode int    `json:"errcode"`
+		ErrMsg  string `json:"errmsg"`
+		MediaId string `json:"media_id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", err
+	}
+
+	if result.ErrCode != 0 {
+		return "", fmt.Errorf("dingtalk upload failed: %d %s", result.ErrCode, result.ErrMsg)
+	}
+
+	return result.MediaId, nil
+}
+
+var dingtalkDefaultCoverPng = []byte{
+	0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
+	0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+	0x01, 0x03, 0x00, 0x00, 0x00, 0x25, 0xdb, 0x56, 0xca, 0x00, 0x00, 0x00,
+	0x03, 0x50, 0x4c, 0x54, 0x45, 0x00, 0x00, 0x00, 0xa7, 0x7a, 0x3d, 0xda,
+	0x00, 0x00, 0x00, 0x01, 0x74, 0x52, 0x4e, 0x53, 0x00, 0x40, 0xe6, 0xd8,
+	0x66, 0x00, 0x00, 0x00, 0x0a, 0x49, 0x44, 0x41, 0x54, 0x08, 0xd7, 0x63,
+	0x60, 0x00, 0x00, 0x00, 0x02, 0x00, 0x01, 0xe2, 0x21, 0xbc, 0x33, 0x00,
+	0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+}
+
+func (c *DingTalkChannel) getCoverMediaId(token string) (string, error) {
+	r := bytes.NewReader(dingtalkDefaultCoverPng)
+	return c.uploadMedia(token, "image", "cover.png", r)
+}
+
+func (c *DingTalkChannel) sendMedia(token, chatID, msgKey string, param interface{}) error {
+	paramBytes, _ := json.Marshal(param)
+	msgParam := string(paramBytes)
+
+	if strings.HasPrefix(chatID, "cid") {
+		headers := &dingtalkrobot.OrgGroupSendHeaders{
+			XAcsDingtalkAccessToken: tea.String(token),
+		}
+		req := &dingtalkrobot.OrgGroupSendRequest{
+			RobotCode:          tea.String(c.Config.RobotCode),
+			OpenConversationId: tea.String(chatID),
+			MsgKey:             tea.String(msgKey),
+			MsgParam:           tea.String(msgParam),
+		}
+		_, err := c.robotClient.OrgGroupSendWithOptions(req, headers, &util.RuntimeOptions{})
+		return err
+	}
+
+	headers := &dingtalkrobot.BatchSendOTOHeaders{
+		XAcsDingtalkAccessToken: tea.String(token),
+	}
+	req := &dingtalkrobot.BatchSendOTORequest{
+		RobotCode: tea.String(c.Config.RobotCode),
+		UserIds:   []*string{tea.String(chatID)},
+		MsgKey:    tea.String(msgKey),
+		MsgParam:  tea.String(msgParam),
+	}
+	_, err := c.robotClient.BatchSendOTOWithOptions(req, headers, &util.RuntimeOptions{})
 	return err
 }

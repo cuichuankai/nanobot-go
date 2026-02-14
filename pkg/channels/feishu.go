@@ -1,9 +1,11 @@
 package channels
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"path/filepath"
@@ -13,6 +15,7 @@ import (
 
 	"github.com/HKUDS/nanobot-go/pkg/bus"
 	"github.com/HKUDS/nanobot-go/pkg/config"
+	"github.com/HKUDS/nanobot-go/pkg/utils"
 
 	lark "github.com/larksuite/oapi-sdk-go/v3"
 	larkcore "github.com/larksuite/oapi-sdk-go/v3/core"
@@ -390,49 +393,219 @@ func (c *FeishuChannel) Send(msg bus.OutboundMessage) error {
 	}
 
 	if msg.Stream != nil {
-		return c.sendStream(msg, receiveIDType)
+		// Only stream text messages
+		if msg.Type == bus.MessageTypeText || msg.Type == "" {
+			return c.sendStream(msg, receiveIDType)
+		}
 	}
 
-	// Construct Interactive Card
-	cardContent := map[string]interface{}{
-		"config": map[string]interface{}{
-			"wide_screen_mode": true,
-		},
-		"header": map[string]interface{}{
-			"title": map[string]interface{}{
-				"tag":     "plain_text",
-				"content": c.getAgentName(),
+	ctx := context.Background()
+
+	switch msg.Type {
+	case bus.MessageTypeImage:
+		if msg.Media == "" {
+			return fmt.Errorf("media path/url is empty")
+		}
+		reader, _, err := utils.GetMediaReader(msg.Media)
+		if err != nil {
+			return err
+		}
+		defer reader.Close()
+
+		imageKey, err := c.uploadImage(ctx, reader)
+		if err != nil {
+			return err
+		}
+
+		content := map[string]interface{}{"image_key": imageKey}
+		contentBytes, _ := json.Marshal(content)
+
+		req := larkim.NewCreateMessageReqBuilder().
+			ReceiveIdType(receiveIDType).
+			Body(larkim.NewCreateMessageReqBodyBuilder().
+				ReceiveId(msg.ChatID).
+				MsgType(larkim.MsgTypeImage).
+				Content(string(contentBytes)).
+				Build()).
+			Build()
+		resp, err := c.client.Im.Message.Create(ctx, req)
+		if err != nil {
+			return err
+		}
+		if !resp.Success() {
+			return fmt.Errorf("feishu send image failed: %d %s", resp.Code, resp.Msg)
+		}
+		return nil
+
+	case bus.MessageTypeAudio:
+		if msg.Media == "" {
+			return fmt.Errorf("media path/url is empty")
+		}
+		reader, filename, err := utils.GetMediaReader(msg.Media)
+		if err != nil {
+			return err
+		}
+		defer reader.Close()
+
+		fileKey, err := c.uploadFile(ctx, reader, filename, "stream")
+		if err != nil {
+			return err
+		}
+
+		content := map[string]interface{}{"file_key": fileKey}
+		contentBytes, _ := json.Marshal(content)
+
+		req := larkim.NewCreateMessageReqBuilder().
+			ReceiveIdType(receiveIDType).
+			Body(larkim.NewCreateMessageReqBodyBuilder().
+				ReceiveId(msg.ChatID).
+				MsgType(larkim.MsgTypeAudio).
+				Content(string(contentBytes)).
+				Build()).
+			Build()
+		resp, err := c.client.Im.Message.Create(ctx, req)
+		if err != nil {
+			return err
+		}
+		if !resp.Success() {
+			return fmt.Errorf("feishu send audio failed: %d %s", resp.Code, resp.Msg)
+		}
+		return nil
+
+	case bus.MessageTypeVideo:
+		if msg.Media == "" {
+			return fmt.Errorf("media path/url is empty")
+		}
+		reader, filename, err := utils.GetMediaReader(msg.Media)
+		if err != nil {
+			return err
+		}
+		defer reader.Close()
+
+		fileKey, err := c.uploadFile(ctx, reader, filename, "mp4")
+		if err != nil {
+			return err
+		}
+
+		imageKey, err := c.getCoverImageKey(ctx)
+		if err != nil {
+			log.Printf("failed to upload cover for video: %v", err)
+			// Continue, maybe it works without cover or we fail later
+		}
+
+		content := map[string]interface{}{"file_key": fileKey, "image_key": imageKey}
+		contentBytes, _ := json.Marshal(content)
+
+		req := larkim.NewCreateMessageReqBuilder().
+			ReceiveIdType(receiveIDType).
+			Body(larkim.NewCreateMessageReqBodyBuilder().
+				ReceiveId(msg.ChatID).
+				MsgType(larkim.MsgTypeMedia).
+				Content(string(contentBytes)).
+				Build()).
+			Build()
+		resp, err := c.client.Im.Message.Create(ctx, req)
+		if err != nil {
+			return err
+		}
+		if !resp.Success() {
+			return fmt.Errorf("feishu send video failed: %d %s", resp.Code, resp.Msg)
+		}
+		return nil
+
+	default:
+		// Construct Interactive Card (Text)
+		cardContent := map[string]interface{}{
+			"config": map[string]interface{}{
+				"wide_screen_mode": true,
 			},
-			"template": "blue",
-		},
-		"elements": []interface{}{
-			map[string]interface{}{
-				"tag": "div",
-				"text": map[string]interface{}{
-					"tag":     "lark_md",
-					"content": msg.Content,
+			"header": map[string]interface{}{
+				"title": map[string]interface{}{
+					"tag":     "plain_text",
+					"content": c.getAgentName(),
+				},
+				"template": "blue",
+			},
+			"elements": []interface{}{
+				map[string]interface{}{
+					"tag": "div",
+					"text": map[string]interface{}{
+						"tag":     "lark_md",
+						"content": msg.Content,
+					},
 				},
 			},
-		},
-	}
-	contentJSON, _ := json.Marshal(cardContent)
+		}
+		contentJSON, _ := json.Marshal(cardContent)
 
-	req := larkim.NewCreateMessageReqBuilder().
-		ReceiveIdType(receiveIDType).
-		Body(larkim.NewCreateMessageReqBodyBuilder().
-			ReceiveId(msg.ChatID).
-			MsgType(larkim.MsgTypeInteractive).
-			Content(string(contentJSON)).
+		req := larkim.NewCreateMessageReqBuilder().
+			ReceiveIdType(receiveIDType).
+			Body(larkim.NewCreateMessageReqBodyBuilder().
+				ReceiveId(msg.ChatID).
+				MsgType(larkim.MsgTypeInteractive).
+				Content(string(contentJSON)).
+				Build()).
+			Build()
+
+		resp, err := c.client.Im.Message.Create(ctx, req)
+		if err != nil {
+			return err
+		}
+		if !resp.Success() {
+			return fmt.Errorf("feishu error: %d %s", resp.Code, resp.Msg)
+		}
+
+		return nil
+	}
+}
+
+func (c *FeishuChannel) uploadImage(ctx context.Context, reader io.Reader) (string, error) {
+	req := larkim.NewCreateImageReqBuilder().
+		Body(larkim.NewCreateImageReqBodyBuilder().
+			ImageType(larkim.ImageTypeMessage).
+			Image(reader).
 			Build()).
 		Build()
-
-	resp, err := c.client.Im.Message.Create(context.Background(), req)
+	resp, err := c.client.Im.Image.Create(ctx, req)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if !resp.Success() {
-		return fmt.Errorf("feishu error: %d %s", resp.Code, resp.Msg)
+		return "", fmt.Errorf("feishu upload image failed: %d %s", resp.Code, resp.Msg)
 	}
+	return *resp.Data.ImageKey, nil
+}
 
-	return nil
+func (c *FeishuChannel) uploadFile(ctx context.Context, reader io.Reader, filename string, fileType string) (string, error) {
+	req := larkim.NewCreateFileReqBuilder().
+		Body(larkim.NewCreateFileReqBodyBuilder().
+			FileType(fileType).
+			FileName(filename).
+			File(reader).
+			Build()).
+		Build()
+	resp, err := c.client.Im.File.Create(ctx, req)
+	if err != nil {
+		return "", err
+	}
+	if !resp.Success() {
+		return "", fmt.Errorf("feishu upload file failed: %d %s", resp.Code, resp.Msg)
+	}
+	return *resp.Data.FileKey, nil
+}
+
+var defaultCoverPng = []byte{
+	0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
+	0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+	0x01, 0x03, 0x00, 0x00, 0x00, 0x25, 0xdb, 0x56, 0xca, 0x00, 0x00, 0x00,
+	0x03, 0x50, 0x4c, 0x54, 0x45, 0x00, 0x00, 0x00, 0xa7, 0x7a, 0x3d, 0xda,
+	0x00, 0x00, 0x00, 0x01, 0x74, 0x52, 0x4e, 0x53, 0x00, 0x40, 0xe6, 0xd8,
+	0x66, 0x00, 0x00, 0x00, 0x0a, 0x49, 0x44, 0x41, 0x54, 0x08, 0xd7, 0x63,
+	0x60, 0x00, 0x00, 0x00, 0x02, 0x00, 0x01, 0xe2, 0x21, 0xbc, 0x33, 0x00,
+	0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+}
+
+func (c *FeishuChannel) getCoverImageKey(ctx context.Context) (string, error) {
+	r := bytes.NewReader(defaultCoverPng)
+	return c.uploadImage(ctx, r)
 }

@@ -71,6 +71,7 @@ type ProvidersConfig struct {
 	Zhipu      ProviderConfig `json:"zhipu"`
 	VLLM       ProviderConfig `json:"vllm"`
 	Gemini     ProviderConfig `json:"gemini"`
+	SiliconFlow ProviderConfig `json:"siliconflow"`
 }
 
 type GatewayConfig struct {
@@ -92,9 +93,17 @@ type ExecToolConfig struct {
 	RestrictToWorkspace bool `json:"restrictToWorkspace"`
 }
 
+type MediaToolConfig struct {
+	DefaultTextToImageModel  string `json:"defaultTextToImageModel"`
+	DefaultImageToImageModel string `json:"defaultImageToImageModel"`
+	DefaultImageToVideoModel string `json:"defaultImageToVideoModel"`
+	DefaultTextToAudioModel  string `json:"defaultTextToAudioModel"`
+}
+
 type ToolsConfig struct {
-	Web  WebToolsConfig `json:"web"`
-	Exec ExecToolConfig `json:"exec"`
+	Web   WebToolsConfig  `json:"web"`
+	Exec  ExecToolConfig  `json:"exec"`
+	Media MediaToolConfig `json:"media"`
 }
 
 type Config struct {
@@ -131,6 +140,12 @@ func DefaultConfig() *Config {
 			Exec: ExecToolConfig{
 				Timeout:             60,
 				RestrictToWorkspace: false,
+			},
+			Media: MediaToolConfig{
+				DefaultTextToImageModel:  "black-forest-labs/FLUX.1-schnell",
+				DefaultImageToImageModel: "Qwen/Qwen-Image-Edit-2509",
+				DefaultImageToVideoModel: "Lightricks/LTX-Video",
+				DefaultTextToAudioModel:  "fishaudio/fish-speech-1.5",
 			},
 		},
 	}

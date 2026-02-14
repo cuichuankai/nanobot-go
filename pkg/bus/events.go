@@ -4,6 +4,16 @@ import (
 	"time"
 )
 
+// MessageType defines the type of the message content.
+type MessageType string
+
+const (
+	MessageTypeText  MessageType = "text"
+	MessageTypeImage MessageType = "image"
+	MessageTypeAudio MessageType = "audio"
+	MessageTypeVideo MessageType = "video"
+)
+
 // InboundMessage represents a message received from a chat channel.
 type InboundMessage struct {
 	Channel   string                 `json:"channel"`
@@ -24,9 +34,10 @@ func (m *InboundMessage) SessionKey() string {
 type OutboundMessage struct {
 	Channel  string                 `json:"channel"`
 	ChatID   string                 `json:"chat_id"`
+	Type     MessageType            `json:"type"`
 	Content  string                 `json:"content"`
 	ReplyTo  string                 `json:"reply_to,omitempty"`
-	Media    []string               `json:"media"`
+	Media    string                 `json:"media"`
 	Metadata map[string]interface{} `json:"metadata"`
 	Stream   <-chan string          `json:"-"`
 }

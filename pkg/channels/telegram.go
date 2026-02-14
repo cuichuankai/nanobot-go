@@ -8,6 +8,7 @@ import (
 
 	"github.com/HKUDS/nanobot-go/pkg/bus"
 	"github.com/HKUDS/nanobot-go/pkg/config"
+	"github.com/HKUDS/nanobot-go/pkg/utils"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
@@ -97,15 +98,50 @@ func (c *TelegramChannel) Send(msg bus.OutboundMessage) error {
 		content = sb.String()
 	}
 
-	if content == "" {
-		return nil
-	}
+	switch msg.Type {
+	case bus.MessageTypeImage, bus.MessageTypeAudio, bus.MessageTypeVideo:
+		if msg.Media == "" {
+			return fmt.Errorf("media path/url is empty")
+		}
+		reader, filename, err := utils.GetMediaReader(msg.Media)
+		if err != nil {
+			return fmt.Errorf("failed to get media: %w", err)
+		}
+		defer reader.Close()
 
-	// Simple text message for now, HTML parsing is complex
-	// TODO: Implement Markdown/HTML conversion
-	reply := tgbotapi.NewMessage(chatID, content)
-	_, err = c.bot.Send(reply)
-	return err
+		file := tgbotapi.FileReader{
+			Name:   filename,
+			Reader: reader,
+		}
+
+		var msgConfig tgbotapi.Chattable
+		switch msg.Type {
+		case bus.MessageTypeImage:
+			p := tgbotapi.NewPhoto(chatID, file)
+			p.Caption = content
+			msgConfig = p
+		case bus.MessageTypeAudio:
+			a := tgbotapi.NewAudio(chatID, file)
+			a.Caption = content
+			msgConfig = a
+		case bus.MessageTypeVideo:
+			v := tgbotapi.NewVideo(chatID, file)
+			v.Caption = content
+			msgConfig = v
+		}
+
+		_, err = c.bot.Send(msgConfig)
+		return err
+
+	default:
+		// Default to text or if explicitly text
+		if content == "" {
+			return nil
+		}
+		reply := tgbotapi.NewMessage(chatID, content)
+		_, err = c.bot.Send(reply)
+		return err
+	}
 }
 
 func (c *TelegramChannel) handleUpdate(update tgbotapi.Update) {
