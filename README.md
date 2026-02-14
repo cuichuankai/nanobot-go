@@ -127,6 +127,9 @@ That's it! You have a working AI assistant in 2 minutes.
 ```bash
 nanobot agent
 ```
+<img width="1394" height="1024" alt="image" src="https://github.com/user-attachments/assets/2e3d6cac-c2e1-4bf6-9c25-1aac1008a69e" />
+<img width="1368" height="1174" alt="image" src="https://github.com/user-attachments/assets/a1477cd7-ea7b-4147-a1a5-41cda0d0d592" />
+
 
 ## Dingtalk Channel
 
@@ -159,3 +162,4 @@ nanobot agent
 ```bash
 nanobot agent
 ```
+<img width="1594" height="824" alt="image" src="https://github.com/user-attachments/assets/024cf8e0-532b-44fc-8d0c-14536b533b45" />
